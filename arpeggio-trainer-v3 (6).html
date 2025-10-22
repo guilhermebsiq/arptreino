@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treinador de Arpejos - Kodály</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const ArpeggioTrainer = () => {
+          // Notas Kodály em Dó fixo - organizadas por categoria
+          const notasKodaly = {
+            diatonicas: ['Do', 'Re', 'Mi', 'Fa', 'So', 'La', 'Ti'],
+            ascendentes: ['Di', 'Ri', 'Fi', 'Si', 'Li'],
+            descendentes: ['Ra', 'Me', 'Se', 'Le', 'Te']
+          };
+          
+          const [arpegio1, setArpegio1] = useState(new Set());
+          const [arpegio2, setArpegio2] = useState(new Set());
+          const [arpejoAtivo, setArpejoAtivo] = useState(1);
+          const [oitavasSelecionadas, setOitavasSelecionadas] = useState(new Set([2]));
+          const [tocando, setTocando] = useState(false);
+          const [bpm, setBpm] = useState(60);
+          const [notaAtual, setNotaAtual] = useState(null);
+          const [compassosPorArpegio, setCompassosPorArpegio] = useState(4);
+          const [contadorCliques, setContadorCliques] = useState(0);
+          const [arpejoAtualTocando, setArpejoAtualTocando] = useState(1);
+          const [emTransicao, setEmTransicao] = useState(false);
+          const parTransicaoAtualRef = useRef(null); // Mudado para useRef
+          const oitavaTransicaoRef = useRef(null); // Nova: memoriza a oitava da transição
+          const intervaloRef = useRef(null);
+          const audioContextRef = useRef(null);
+
+          // Mapeamento de notas para semitons (relativo a Do)
+          const notasParaSemitons = {
+            'Do': 0, 'Di': 1, 'Ra': 1,
+            'Re': 2, 'Ri': 3, 'Me': 3,
+            'Mi': 4, 'Fa': 5, 'Fi': 6, 'Se': 6,
+            'So': 7, 'Si': 8, 'Le': 8,
+            'La': 9, 'Li': 10, 'Te': 10,
+            'Ti': 11
+          };
+
+          // Frequências das notas
+          const frequencias = {
+            'Do': [130.81, 261.63, 523.25], 'Re': [146.83, 293.66, 587.33],
+            'Mi': [164.81, 329.63, 659.25], 'Fa': [174.61, 349.23, 698.46],
+            'So': [196.00, 392.00, 783.99], 'La': [220.00, 440.00, 880.00],
+            'Ti': [246.94, 493.88, 987.77], 'Di': [138.59, 277.18, 554.37],
+            'Ri': [155.56, 311.13, 622.25], 'Fi': [185.00, 369.99, 739.99],
+            'Si': [207.65, 415.30, 830.61], 'Li': [233.08, 466.16, 932.33],
+            'Ra': [138.59, 277.18, 554.37], 'Me': [155.56, 311.13, 622.25],
+            'Se': [185.00, 369.99, 739.99], 'Le': [207.65, 415.30, 830.61],
+            'Te': [233.08, 466.16, 932.33]
+          };
+
+          useEffect(() => {
+            audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            return () => {
+              if (audioContextRef.current) {
+                audioContextRef.current.close();
+              }
+            };
+          }, []);
+
+          const tocarNota = (nota, oitava) => {
+            if (!audioContextRef.current) return;
+            const ctx = audioContextRef.current;
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            oscillator.frequency.value = frequencias[nota][oitava - 1];
+            oscillator.type = 'sine';
+            gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.5);
+          };
+
+          const tocarCliqueMetronomo = () => {
+            if (!audioContextRef.current) return;
+            const ctx = audioContextRef.current;
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            oscillator.frequency.value = 1000;
+            oscillator.type = 'sine';
+            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.05);
+          };
+
+          const toggleNota = (nota) => {
+            const arpegio = arpejoAtivo === 1 ? arpegio1 : arpegio2;
+            const setArpegio = arpejoAtivo === 1 ? setArpegio1 : setArpegio2;
+            const novas = new Set(arpegio);
+            if (novas.has(nota)) {
+              novas.delete(nota);
+            } else {
+              novas.add(nota);
+            }
+            setArpegio(novas);
+          };
+
+          const toggleOitava = (oitava) => {
+            const novas = new Set(oitavasSelecionadas);
+            if (novas.has(oitava)) {
+              novas.delete(oitava);
+            } else {
+              novas.add(oitava);
+            }
+            setOitavasSelecionadas(novas);
+          };
+
+          const calcularDistancia = (nota1, nota2) => {
+            const sem1 = notasParaSemitons[nota1];
+            const sem2 = notasParaSemitons[nota2];
+            const diff = Math.abs(sem1 - sem2);
+            // Distância cromática (considera a volta da oitava)
+            return Math.min(diff, 12 - diff);
+          };
+
+          const encontrarNotasProximas = (arpegio1Set, arpegio2Set) => {
+            let menorDistancia = 12;
+            let notasProximas = [];
+            
+            // Tabela de distâncias para debug
+            const tabelaDistancias = [];
+
+            for (let nota1 of arpegio1Set) {
+              for (let nota2 of arpegio2Set) {
+                // Não pode ser a mesma nota
+                if (nota1 === nota2) continue;
+                
+                const dist = calcularDistancia(nota1, nota2);
+                tabelaDistancias.push({ nota1, nota2, distancia: dist });
+                
+                if (dist < menorDistancia) {
+                  menorDistancia = dist;
+                  notasProximas = [[nota1, nota2]];
+                } else if (dist === menorDistancia) {
+                  notasProximas.push([nota1, nota2]);
+                }
+              }
+            }
+            
+            console.log('Tabela de distâncias completa:', tabelaDistancias.sort((a, b) => a.distancia - b.distancia));
+            console.log('Menor distância encontrada:', menorDistancia);
+            console.log('Todos os pares com menor distância:', notasProximas);
+            
+            // IMPORTANTE: Agora vamos filtrar para ter apenas um par por nota única
+            // Se temos [['Do', 'Di'], ['La', 'Ti']], queremos escolher apenas um par
+            // que realmente faz a ponte. Vamos agrupar por conexão.
+            
+            // Na verdade, o problema é que estamos escolhendo pares aleatórios
+            // que não necessariamente se conectam. Precisamos garantir que
+            // se escolhemos ['Do', 'Di'] na ida, escolhemos ['Di', 'Do'] na volta.
+            
+            return notasProximas;
+          };
+
+          const selecionarNotaAleatoria = () => {
+            const arpejoAtual = arpejoAtualTocando === 1 ? arpegio1 : arpegio2;
+            
+            if (arpejoAtual.size === 0 || oitavasSelecionadas.size === 0) return;
+
+            const notasArray = Array.from(arpejoAtual);
+            const oitavasArray = Array.from(oitavasSelecionadas);
+
+            const notaSorteada = notasArray[Math.floor(Math.random() * notasArray.length)];
+            const oitavaSorteada = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+
+            setNotaAtual({ nota: notaSorteada, oitava: oitavaSorteada });
+            tocarNota(notaSorteada, oitavaSorteada);
+          };
+
+          const selecionarNotaTransicao = () => {
+            const arpejoOrigem = arpejoAtualTocando === 1 ? arpegio1 : arpegio2;
+            const arpejoDestino = arpejoAtualTocando === 1 ? arpegio2 : arpegio1;
+            
+            const notasProximas = encontrarNotasProximas(arpejoOrigem, arpejoDestino);
+            
+            if (notasProximas.length === 0) {
+              selecionarNotaAleatoria();
+              return;
+            }
+
+            const parEscolhido = notasProximas[Math.floor(Math.random() * notasProximas.length)];
+            const notaEscolhida = emTransicao ? parEscolhido[1] : parEscolhido[0];
+            
+            const oitavasArray = Array.from(oitavasSelecionadas);
+            const oitavaSorteada = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+
+            setNotaAtual({ nota: notaEscolhida, oitava: oitavaSorteada });
+            tocarNota(notaEscolhida, oitavaSorteada);
+          };
+
+          const proximoClique = () => {
+            setContadorCliques(prevContador => {
+              const novoContador = prevContador + 1;
+              
+              // Calcula em qual clique do ciclo atual estamos (1 a compassosPorArpegio)
+              const cliqueDoCiclo = ((novoContador - 1) % compassosPorArpegio) + 1;
+              
+              // Determina qual arpegio deve estar tocando baseado no contador total
+              const cicloAtual = Math.floor((novoContador - 1) / compassosPorArpegio);
+              const arpejoCorreto = (cicloAtual % 2) + 1;
+              
+              // Atualiza o arpegio
+              setArpejoAtualTocando(arpejoCorreto);
+              
+              console.log('Clique', novoContador, '- Ciclo:', cliqueDoCiclo, '/', compassosPorArpegio, '- Arpegio:', arpejoCorreto);
+              
+              // Último clique de qualquer arpegio - SEMPRE transição
+              if (cliqueDoCiclo === compassosPorArpegio) {
+                console.log('→ TRANSIÇÃO 1: último clique do arpegio', arpejoCorreto);
+                setEmTransicao(true);
+                selecionarNotaTransicaoComArpegio(arpejoCorreto, true);
+              }
+              // Primeiro clique de qualquer arpegio - SEMPRE transição EXCETO o primeiro de todos
+              else if (cliqueDoCiclo === 1 && novoContador > 1) {
+                console.log('→ TRANSIÇÃO 2: primeiro clique do arpegio', arpejoCorreto);
+                setEmTransicao(true);
+                selecionarNotaTransicaoComArpegio(arpejoCorreto, false);
+              }
+              // Cliques normais (2, 3 no caso de 4 cliques por arpegio)
+              else {
+                console.log('→ Clique normal');
+                setEmTransicao(false);
+                selecionarNotaAleatoriaComArpegio(arpejoCorreto);
+              }
+              
+              return novoContador;
+            });
+          };
+
+          const selecionarNotaAleatoriaComArpegio = (numArpegio) => {
+            const arpejoAtual = numArpegio === 1 ? arpegio1 : arpegio2;
+            
+            if (arpejoAtual.size === 0 || oitavasSelecionadas.size === 0) return;
+
+            const notasArray = Array.from(arpejoAtual);
+            const oitavasArray = Array.from(oitavasSelecionadas);
+
+            const notaSorteada = notasArray[Math.floor(Math.random() * notasArray.length)];
+            const oitavaSorteada = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+
+            console.log('Selecionada aleatória:', notaSorteada + oitavaSorteada, 'do arpegio', numArpegio);
+            tocarCliqueMetronomo();
+            setNotaAtual({ nota: notaSorteada, oitava: oitavaSorteada });
+            tocarNota(notaSorteada, oitavaSorteada);
+          };
+
+          const selecionarNotaTransicaoComArpegio = (numArpegio, usarArpejoOrigem) => {
+            const arpejoOrigem = numArpegio === 1 ? arpegio1 : arpegio2;
+            const arpejoDestino = numArpegio === 1 ? arpegio2 : arpegio1;
+            
+            console.log('=== TRANSIÇÃO ===');
+            console.log('NumArpegio:', numArpegio, '- Tipo:', usarArpejoOrigem ? 'ÚLTIMO clique' : 'PRIMEIRO clique');
+            console.log('Arpegio 1:', Array.from(arpegio1));
+            console.log('Arpegio 2:', Array.from(arpegio2));
+            console.log('Par memorizado antes:', parTransicaoAtualRef.current);
+            console.log('Oitava memorizada antes:', oitavaTransicaoRef.current);
+            
+            let parEscolhido;
+            let oitavaSorteada;
+            
+            // Se é o ÚLTIMO clique: escolhe um novo par e oitava, e memoriza ambos
+            if (usarArpejoOrigem) {
+              const notasProximas = encontrarNotasProximas(arpejoOrigem, arpejoDestino);
+              
+              if (notasProximas.length === 0) {
+                console.log('⚠️ Sem notas próximas diferentes, usando aleatória');
+                selecionarNotaAleatoriaComArpegio(numArpegio);
+                return;
+              }
+
+              parEscolhido = notasProximas[Math.floor(Math.random() * notasProximas.length)];
+              parTransicaoAtualRef.current = parEscolhido; // Memoriza o par
+              
+              const oitavasArray = Array.from(oitavasSelecionadas);
+              oitavaSorteada = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+              oitavaTransicaoRef.current = oitavaSorteada; // Memoriza a oitava
+              
+              console.log('✓ Novo par escolhido e MEMORIZADO:', parEscolhido);
+              console.log('✓ Nova oitava escolhida e MEMORIZADA:', oitavaSorteada);
+            } 
+            // Se é o PRIMEIRO clique: usa o par memorizado invertido E a mesma oitava
+            else {
+              if (!parTransicaoAtualRef.current) {
+                console.log('⚠️ Sem par memorizado, escolhendo novo');
+                const notasProximas = encontrarNotasProximas(arpejoOrigem, arpejoDestino);
+                if (notasProximas.length === 0) {
+                  selecionarNotaAleatoriaComArpegio(numArpegio);
+                  return;
+                }
+                parEscolhido = notasProximas[Math.floor(Math.random() * notasProximas.length)];
+                const oitavasArray = Array.from(oitavasSelecionadas);
+                oitavaSorteada = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+              } else {
+                // Inverte o par: se era ['Do', 'Di'], vira ['Di', 'Do']
+                parEscolhido = [parTransicaoAtualRef.current[1], parTransicaoAtualRef.current[0]];
+                // USA A MESMA OITAVA da transição anterior
+                oitavaSorteada = oitavaTransicaoRef.current || Array.from(oitavasSelecionadas)[0];
+                console.log('✓ Usando par INVERTIDO:', parEscolhido, '(original era', parTransicaoAtualRef.current, ')');
+                console.log('✓ Usando a MESMA OITAVA:', oitavaSorteada);
+              }
+            }
+            
+            // Sempre pega a primeira nota do par (que é do arpegio atual)
+            const notaEscolhida = parEscolhido[0];
+            
+            // VALIDAÇÃO
+            if (!arpejoOrigem.has(notaEscolhida)) {
+              console.error('❌ ERRO! Nota', notaEscolhida, 'não está no arpegio', numArpegio);
+              console.error('ArpejoOrigem:', Array.from(arpejoOrigem));
+              const notasArray = Array.from(arpejoOrigem);
+              const notaCorreta = notasArray[Math.floor(Math.random() * notasArray.length)];
+              
+              const oitavasArray = Array.from(oitavasSelecionadas);
+              const oitavaCorreta = oitavasArray[Math.floor(Math.random() * oitavasArray.length)];
+              tocarCliqueMetronomo();
+              setNotaAtual({ nota: notaCorreta, oitava: oitavaCorreta });
+              tocarNota(notaCorreta, oitavaCorreta);
+              return;
+            }
+
+            console.log('✓ Nota de transição:', notaEscolhida + oitavaSorteada, 'do par:', parEscolhido);
+            console.log('=================\n');
+            
+            tocarCliqueMetronomo();
+            setNotaAtual({ nota: notaEscolhida, oitava: oitavaSorteada });
+            tocarNota(notaEscolhida, oitavaSorteada);
+          };
+
+          const toggleMetronomo = () => {
+            if (tocando) {
+              if (intervaloRef.current) {
+                clearInterval(intervaloRef.current);
+                intervaloRef.current = null;
+              }
+              setTocando(false);
+              setNotaAtual(null);
+              setContadorCliques(0);
+              setArpejoAtualTocando(1);
+              setEmTransicao(false);
+              parTransicaoAtualRef.current = null;
+              oitavaTransicaoRef.current = null; // Reset da oitava
+            } else {
+              if (arpegio1.size === 0 || arpegio2.size === 0) {
+                alert('Selecione notas para ambos os arpegios!');
+                return;
+              }
+              if (oitavasSelecionadas.size === 0) {
+                alert('Selecione pelo menos uma oitava!');
+                return;
+              }
+
+              // Resume AudioContext para funcionar no celular
+              if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                audioContextRef.current.resume();
+              }
+
+              setTocando(true);
+              setContadorCliques(1);
+              setArpejoAtualTocando(1);
+              parTransicaoAtualRef.current = null;
+              oitavaTransicaoRef.current = null; // Reset da oitava
+              selecionarNotaAleatoriaComArpegio(1);
+              
+              const intervalo = (60 / bpm) * 1000;
+              intervaloRef.current = setInterval(() => proximoClique(), intervalo);
+            }
+          };
+
+          useEffect(() => {
+            if (tocando && intervaloRef.current) {
+              clearInterval(intervaloRef.current);
+              const intervalo = (60 / bpm) * 1000;
+              intervaloRef.current = setInterval(() => proximoClique(), intervalo);
+            }
+          }, [bpm]);
+
+          useEffect(() => {
+            return () => {
+              if (intervaloRef.current) {
+                clearInterval(intervaloRef.current);
+              }
+            };
+          }, []);
+
+          const PlayIcon = () => (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+          );
+
+          const PauseIcon = () => (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+          );
+
+          const VolumeIcon = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+          );
+
+          const arpegio = arpejoAtivo === 1 ? arpegio1 : arpegio2;
+          const cliquesNoArpegio = ((contadorCliques - 1) % compassosPorArpegio) + 1;
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-800 p-8">
+              <div className="max-w-4xl mx-auto">
+                <h1 className="text-5xl font-bold text-white text-center mb-8 drop-shadow-lg">
+                  🎵 Treinador de Arpejos
+                </h1>
+
+                {/* Display da nota atual */}
+                <div className="bg-white rounded-2xl shadow-2xl p-12 mb-4 text-center">
+                  {notaAtual ? (
+                    <div>
+                      <div className="text-8xl font-bold text-indigo-600 mb-4 animate-pulse">
+                        {notaAtual.nota}{notaAtual.oitava}
+                      </div>
+                      <div className="text-2xl text-gray-600">
+                        Arpegio {arpejoAtualTocando} - Clique {cliquesNoArpegio}/{compassosPorArpegio}
+                        {emTransicao && <span className="text-orange-600 ml-2">🔄 Transição</span>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-4xl text-gray-400">
+                      {tocando ? 'Aguardando...' : 'Pronto para começar'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Botão Start/Stop */}
+                <button
+                  onClick={toggleMetronomo}
+                  className={`w-full py-6 rounded-2xl font-bold text-2xl transition-all duration-300 transform hover:scale-105 shadow-2xl flex items-center justify-center gap-4 mb-8 ${
+                    tocando
+                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                      : 'bg-green-600 hover:bg-green-700 text-white'
+                  }`}
+                >
+                  {tocando ? (
+                    <>
+                      <PauseIcon />
+                      Parar
+                    </>
+                  ) : (
+                    <>
+                      <PlayIcon />
+                      Iniciar
+                    </>
+                  )}
+                </button>
+
+                {/* Seletor de arpegio ativo */}
+                <div className="bg-white rounded-2xl shadow-2xl p-6 mb-8">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">Editando:</h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      onClick={() => setArpejoAtivo(1)}
+                      disabled={tocando}
+                      className={`py-4 px-6 rounded-xl font-bold text-xl transition-all ${
+                        arpejoAtivo === 1
+                          ? 'bg-indigo-600 text-white shadow-lg scale-105'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      } ${tocando ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Arpegio 1 ({arpegio1.size} notas)
+                    </button>
+                    <button
+                      onClick={() => setArpejoAtivo(2)}
+                      disabled={tocando}
+                      className={`py-4 px-6 rounded-xl font-bold text-xl transition-all ${
+                        arpejoAtivo === 2
+                          ? 'bg-purple-600 text-white shadow-lg scale-105'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      } ${tocando ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Arpegio 2 ({arpegio2.size} notas)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Seleção de notas */}
+                <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+                    <VolumeIcon />
+                    Selecione as Notas - Arpegio {arpejoAtivo}
+                  </h2>
+                  
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Diatônicas</h3>
+                    <div className="grid grid-cols-4 gap-3 sm:grid-cols-7">
+                      {notasKodaly.diatonicas.map((nota) => (
+                        <label
+                          key={nota}
+                          className={`flex items-center justify-center p-5 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-105 ${
+                            arpegio.has(nota)
+                              ? 'bg-indigo-600 text-white shadow-lg'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={arpegio.has(nota)}
+                            onChange={() => toggleNota(nota)}
+                            disabled={tocando}
+                          />
+                          <span className="text-xl font-bold">{nota}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Ascendentes (♯)</h3>
+                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                      {notasKodaly.ascendentes.map((nota) => (
+                        <label
+                          key={nota}
+                          className={`flex items-center justify-center p-5 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-105 ${
+                            arpegio.has(nota)
+                              ? 'bg-green-600 text-white shadow-lg'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={arpegio.has(nota)}
+                            onChange={() => toggleNota(nota)}
+                            disabled={tocando}
+                          />
+                          <span className="text-xl font-bold">{nota}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-700 mb-3">Descendentes (♭)</h3>
+                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                      {notasKodaly.descendentes.map((nota) => (
+                        <label
+                          key={nota}
+                          className={`flex items-center justify-center p-5 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-105 ${
+                            arpegio.has(nota)
+                              ? 'bg-orange-600 text-white shadow-lg'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={arpegio.has(nota)}
+                            onChange={() => toggleNota(nota)}
+                            disabled={tocando}
+                          />
+                          <span className="text-xl font-bold">{nota}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Seleção de oitavas */}
+                <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-6">Selecione as Oitavas</h2>
+                  <div className="grid grid-cols-3 gap-4">
+                    {[1, 2, 3].map((oitava) => (
+                      <label
+                        key={oitava}
+                        className={`flex items-center justify-center p-6 rounded-xl cursor-pointer transition-all duration-200 transform hover:scale-105 ${
+                          oitavasSelecionadas.has(oitava)
+                            ? 'bg-pink-600 text-white shadow-lg'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="hidden"
+                          checked={oitavasSelecionadas.has(oitava)}
+                          onChange={() => toggleOitava(oitava)}
+                          disabled={tocando}
+                        />
+                        <span className="text-2xl font-bold">{oitava}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Compassos por arpegio */}
+                <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-6">Cliques por Arpegio</h2>
+                  <div className="flex items-center gap-4">
+                    <span className="text-lg font-semibold text-gray-700 w-32">{compassosPorArpegio} cliques</span>
+                    <input
+                      type="range"
+                      min="2"
+                      max="16"
+                      value={compassosPorArpegio}
+                      onChange={(e) => setCompassosPorArpegio(Number(e.target.value))}
+                      className="flex-1 h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                      disabled={tocando}
+                    />
+                  </div>
+                </div>
+
+                {/* Controles do metrônomo */}
+                <div className="bg-white rounded-2xl shadow-2xl p-8 mb-8">
+                  <h2 className="text-2xl font-bold text-gray-800 mb-6">Velocidade do Metrônomo</h2>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <span className="text-lg font-semibold text-gray-700 w-32">{bpm} BPM</span>
+                      <input
+                        type="range"
+                        min="10"
+                        max="200"
+                        value={bpm}
+                        onChange={(e) => setBpm(Number(e.target.value))}
+                        className="flex-1 h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                        disabled={tocando}
+                      />
+                    </div>
+                    <div className="flex justify-between text-sm text-gray-500">
+                      <span>Lento (10)</span>
+                      <span>Rápido (200)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Instruções */}
+                <div className="mt-8 bg-white bg-opacity-20 backdrop-blur-lg rounded-2xl p-6 text-white">
+                  <h3 className="text-xl font-bold mb-3">📖 Como usar:</h3>
+                  <ol className="list-decimal list-inside space-y-2">
+                    <li>Selecione as notas do Arpegio 1</li>
+                    <li>Mude para Arpegio 2 e selecione suas notas</li>
+                    <li>Escolha quantos cliques por arpegio</li>
+                    <li>Ajuste a velocidade (BPM) e as oitavas</li>
+                    <li>Clique em "Iniciar" - os últimos 2 cliques fazem a transição suave!</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ArpeggioTrainer />);
+    </script>
+</body>
+</html>
