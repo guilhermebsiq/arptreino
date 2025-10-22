@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -25,7 +26,10 @@
           
           const [arpegio1, setArpegio1] = useState(new Set());
           const [arpegio2, setArpegio2] = useState(new Set());
+          const [arpegio3, setArpegio3] = useState(new Set());
+          const [arpegio4, setArpegio4] = useState(new Set());
           const [arpejoAtivo, setArpejoAtivo] = useState(1);
+          const [quantosArpegios, setQuantosArpegios] = useState(2);
           const [oitavasSelecionadas, setOitavasSelecionadas] = useState(new Set([2]));
           const [tocando, setTocando] = useState(false);
           const [bpm, setBpm] = useState(60);
@@ -102,8 +106,12 @@
           };
 
           const toggleNota = (nota) => {
-            const arpegio = arpejoAtivo === 1 ? arpegio1 : arpegio2;
-            const setArpegio = arpejoAtivo === 1 ? setArpegio1 : setArpegio2;
+            const arpegios = [arpegio1, arpegio2, arpegio3, arpegio4];
+            const setArpegios = [setArpegio1, setArpegio2, setArpegio3, setArpegio4];
+            
+            const arpegio = arpegios[arpejoAtivo - 1];
+            const setArpegio = setArpegios[arpejoAtivo - 1];
+            
             const novas = new Set(arpegio);
             if (novas.has(nota)) {
               novas.delete(nota);
@@ -213,9 +221,9 @@
               // Calcula em qual clique do ciclo atual estamos (1 a compassosPorArpegio)
               const cliqueDoCiclo = ((novoContador - 1) % compassosPorArpegio) + 1;
               
-              // Determina qual arpegio deve estar tocando baseado no contador total
+              // Determina qual arpegio deve estar tocando baseado no contador total e quantosArpegios
               const cicloAtual = Math.floor((novoContador - 1) / compassosPorArpegio);
-              const arpejoCorreto = (cicloAtual % 2) + 1;
+              const arpejoCorreto = (cicloAtual % quantosArpegios) + 1;
               
               // Atualiza o arpegio
               setArpejoAtualTocando(arpejoCorreto);
@@ -246,7 +254,8 @@
           };
 
           const selecionarNotaAleatoriaComArpegio = (numArpegio) => {
-            const arpejoAtual = numArpegio === 1 ? arpegio1 : arpegio2;
+            const arpegios = [arpegio1, arpegio2, arpegio3, arpegio4];
+            const arpejoAtual = arpegios[numArpegio - 1];
             
             if (arpejoAtual.size === 0 || oitavasSelecionadas.size === 0) return;
 
@@ -263,13 +272,16 @@
           };
 
           const selecionarNotaTransicaoComArpegio = (numArpegio, usarArpejoOrigem) => {
-            const arpejoOrigem = numArpegio === 1 ? arpegio1 : arpegio2;
-            const arpejoDestino = numArpegio === 1 ? arpegio2 : arpegio1;
+            const arpegios = [arpegio1, arpegio2, arpegio3, arpegio4];
+            const arpejoOrigem = arpegios[numArpegio - 1];
+            
+            // Determina o próximo arpegio em rotação
+            const proximoNumArpegio = (numArpegio % quantosArpegios) + 1;
+            const arpejoDestino = arpegios[proximoNumArpegio - 1];
             
             console.log('=== TRANSIÇÃO ===');
             console.log('NumArpegio:', numArpegio, '- Tipo:', usarArpejoOrigem ? 'ÚLTIMO clique' : 'PRIMEIRO clique');
-            console.log('Arpegio 1:', Array.from(arpegio1));
-            console.log('Arpegio 2:', Array.from(arpegio2));
+            console.log('Próximo arpegio:', proximoNumArpegio);
             console.log('Par memorizado antes:', parTransicaoAtualRef.current);
             console.log('Oitava memorizada antes:', oitavaTransicaoRef.current);
             
@@ -358,25 +370,36 @@
               parTransicaoAtualRef.current = null;
               oitavaTransicaoRef.current = null; // Reset da oitava
             } else {
-              if (arpegio1.size === 0 || arpegio2.size === 0) {
-                alert('Selecione notas para ambos os arpegios!');
-                return;
+              // Valida se os arpegios selecionados têm notas
+              const arpegios = [arpegio1, arpegio2, arpegio3, arpegio4];
+              for (let i = 0; i < quantosArpegios; i++) {
+                if (arpegios[i].size === 0) {
+                  alert(`Selecione notas para o Arpegio ${i + 1}!`);
+                  return;
+                }
               }
+              
               if (oitavasSelecionadas.size === 0) {
                 alert('Selecione pelo menos uma oitava!');
                 return;
               }
 
-              // Resume AudioContext para funcionar no celular
-              if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                audioContextRef.current.resume();
+              // Garante que o AudioContext está criado e ativo (necessário para iOS/mobile)
+              if (!audioContextRef.current) {
+                audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+              }
+              
+              if (audioContextRef.current.state === 'suspended') {
+                audioContextRef.current.resume().then(() => {
+                  console.log('AudioContext resumed');
+                });
               }
 
               setTocando(true);
               setContadorCliques(1);
               setArpejoAtualTocando(1);
               parTransicaoAtualRef.current = null;
-              oitavaTransicaoRef.current = null; // Reset da oitava
+              oitavaTransicaoRef.current = null;
               selecionarNotaAleatoriaComArpegio(1);
               
               const intervalo = (60 / bpm) * 1000;
@@ -420,7 +443,8 @@
             </svg>
           );
 
-          const arpegio = arpejoAtivo === 1 ? arpegio1 : arpegio2;
+          const arpegios = [arpegio1, arpegio2, arpegio3, arpegio4];
+          const arpegio = arpegios[arpejoAtivo - 1];
           const cliquesNoArpegio = ((contadorCliques - 1) % compassosPorArpegio) + 1;
 
           return (
@@ -471,6 +495,27 @@
                   )}
                 </button>
 
+                {/* Seletor de quantos arpegios */}
+                <div className="bg-white rounded-2xl shadow-2xl p-6 mb-8">
+                  <h2 className="text-xl font-bold text-gray-800 mb-4">Quantos Arpegios Treinar:</h2>
+                  <div className="grid grid-cols-4 gap-3">
+                    {[1, 2, 3, 4].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => setQuantosArpegios(num)}
+                        disabled={tocando}
+                        className={`py-3 px-4 rounded-xl font-bold text-lg transition-all ${
+                          quantosArpegios === num
+                            ? 'bg-green-600 text-white shadow-lg scale-105'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        } ${tocando ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Seletor de arpegio ativo */}
                 <div className="bg-white rounded-2xl shadow-2xl p-6 mb-8">
                   <h2 className="text-xl font-bold text-gray-800 mb-4">Editando:</h2>
@@ -496,6 +541,28 @@
                       } ${tocando ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       Arpegio 2 ({arpegio2.size} notas)
+                    </button>
+                    <button
+                      onClick={() => setArpejoAtivo(3)}
+                      disabled={tocando || quantosArpegios < 3}
+                      className={`py-4 px-6 rounded-xl font-bold text-xl transition-all ${
+                        arpejoAtivo === 3
+                          ? 'bg-pink-600 text-white shadow-lg scale-105'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      } ${(tocando || quantosArpegios < 3) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Arpegio 3 ({arpegio3.size} notas)
+                    </button>
+                    <button
+                      onClick={() => setArpejoAtivo(4)}
+                      disabled={tocando || quantosArpegios < 4}
+                      className={`py-4 px-6 rounded-xl font-bold text-xl transition-all ${
+                        arpejoAtivo === 4
+                          ? 'bg-orange-600 text-white shadow-lg scale-105'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      } ${(tocando || quantosArpegios < 4) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Arpegio 4 ({arpegio4.size} notas)
                     </button>
                   </div>
                 </div>
