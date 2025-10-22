@@ -367,6 +367,11 @@
                 return;
               }
 
+              // Resume AudioContext para funcionar no celular
+              if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                audioContextRef.current.resume();
+              }
+
               setTocando(true);
               setContadorCliques(1);
               setArpejoAtualTocando(1);
